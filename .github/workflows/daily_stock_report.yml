@@ -22,6 +22,8 @@ jobs:
     name: Generar y distribuir reporte
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # Necesario para hacer git push del reporte generado
 
     steps:
       # 1. Clonar el repositorio
