@@ -20,7 +20,7 @@ import sys
 import time
 
 from groq import Groq
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
@@ -66,7 +66,10 @@ def buscar_ticker(ddgs: DDGS, ticker: str) -> str:
         except Exception as e:
             resultados.append(f"[Error en búsqueda '{query}': {e}]")
 
-    return "\n\n".join(resultados) if resultados else "Sin resultados."
+    if not resultados:
+        print(f"   ⚠️  Sin resultados de búsqueda para {ticker}")
+        return "Sin resultados de búsqueda."
+    return "\n\n".join(resultados)
 
 
 def recopilar_contexto_macro(fecha: str) -> str:
@@ -116,6 +119,16 @@ def _llamar_groq(client: Groq, system: str, user: str, max_tokens: int, etiqueta
     return response.choices[0].message.content
 
 
+def _extraer_instrucciones_analisis(prompt_base: str) -> str:
+    """Extrae solo las instrucciones de análisis (Pasos 1–7) sin el bloque de formato de salida.
+    Esto evita que el modelo genere el header completo del reporte en los análisis parciales."""
+    marcador_formato = "## FORMATO DEL REPORTE DE SALIDA"
+    idx = prompt_base.find(marcador_formato)
+    if idx != -1:
+        return prompt_base[:idx].strip()
+    return prompt_base
+
+
 def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str, contexto_tickers: str, fecha: str, tickers_chunk: list) -> str:
     """Genera el análisis solo para un grupo de acciones (evita límite de tokens)."""
     system_prompt = (
@@ -126,7 +139,11 @@ def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str
         "indicalo explícitamente con '⚠️ Dato no disponible'."
     )
 
-    user_message = f"""{prompt_base}
+    # Solo pasar instrucciones de análisis, NO el bloque de formato de salida
+    # Esto evita que el modelo genere el header completo del reporte
+    instrucciones = _extraer_instrucciones_analisis(prompt_base)
+
+    user_message = f"""{instrucciones}
 
 ---
 
@@ -143,8 +160,10 @@ def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str
 - Fecha del reporte: {fecha}
 - ESTA ES UNA EJECUCIÓN PARCIAL. Solo debes analizar los siguientes instrumentos: {', '.join(tickers_chunk)}.
 - Ignora el resto de los instrumentos de la watchlist.
-- Genera SOLO la sección "## 📊 ANÁLISIS POR INSTRUMENTO" para estos {len(tickers_chunk)} tickers, sin incluir la introducción macro, alertas prioritarias, resumen ejecutivo ni disclaimer.
-- Usa exactamente el formato indicado para cada ticker.
+- Genera SOLO los bloques de análisis para estos {len(tickers_chunk)} tickers.
+- Comenzá directamente con "### {tickers_chunk[0]} —" sin ningún encabezado previo.
+- No incluyas introducción macro, alertas prioritarias, resumen ejecutivo, disclaimer ni el header del reporte.
+- Usá exactamente el formato de análisis por instrumento indicado arriba para cada ticker.
 """
 
     print(f"🤖 Enviando análisis parcial a Groq para {', '.join(tickers_chunk)}...")

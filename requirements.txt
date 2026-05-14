@@ -1,3 +1,3 @@
 groq
-duckduckgo-search
+ddgs
 markdown>=3.5.0
