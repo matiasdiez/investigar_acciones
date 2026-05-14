@@ -26,7 +26,7 @@ from duckduckgo_search import DDGS
 PROMPT_FILE   = pathlib.Path("prompt_llm.md")
 REPORTES_DIR  = pathlib.Path("reportes")
 MODEL         = "llama-3.3-70b-versatile"
-MAX_TOKENS    = 2048
+MAX_TOKENS    = 4096
 TEMPERATURA   = 0.2   # Bajo para maximizar precisión en análisis financiero
 
 WATCHLIST = ["AAPL", "AMZN", "BIOX", "BRK.B", "GLD", "KO", "NVDA", "SPY", "XLU"]
@@ -57,7 +57,7 @@ def buscar_ticker(ddgs: DDGS, ticker: str) -> str:
 
     for query in queries:
         try:
-            hits = ddgs.text(query, max_results=1)
+            hits = ddgs.text(query, max_results=3)
             for hit in hits:
                 resultados.append(
                     f"[{hit.get('title', '')}]\n{hit.get('body', '')}\nFuente: {hit.get('href', '')}"
@@ -78,7 +78,7 @@ def recopilar_contexto_mercado(fecha: str) -> str:
         # Contexto macro general
         print("   ↳ Contexto macro del día...")
         try:
-            macro = ddgs.text("S&P 500 market today Wall Street", max_results=1)
+            macro = ddgs.text("S&P 500 market today Wall Street", max_results=3)
             macro_txt = "\n".join(h.get("body", "") for h in macro)
             bloques.append(f"## Contexto macro\n{macro_txt}\n")
             time.sleep(0.5)
