@@ -3,7 +3,7 @@ name: 📈 Daily Stock Report
 on:
   # Disparo automático: lunes a viernes a las 21:00 ET (01:00 UTC del día siguiente)
   schedule:
-    - cron: "0 1 * * 2-6"
+    - cron: "0 21 * * 1-5"
 
   # Disparo manual desde la pestaña Actions de GitHub (útil para testear)
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
       # 4. Generar el reporte con Claude API
       - name: Generar reporte de acciones
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python run_analysis.py
 
       # 5. Enviar por email (condicional)
