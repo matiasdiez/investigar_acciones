@@ -147,6 +147,18 @@ def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str
     return response.choices[0].message.content
 
 
+def _extraer_seccion_formato(prompt_base: str) -> str:
+    """Extrae solo la sección de formato de salida del prompt base para reducir tokens."""
+    # Busca el bloque de formato de salida para no enviar todo el prompt en la síntesis
+    marcadores = ["## FORMATO DEL REPORTE DE SALIDA", "## FORMATO DE SALIDA", "## Formato de salida", "# FORMATO", "## OUTPUT", "## SALIDA"]
+    for marcador in marcadores:
+        idx = prompt_base.find(marcador)
+        if idx != -1:
+            return prompt_base[idx:]
+    # Si no encuentra un marcador, devuelve los últimos 3000 caracteres (sección de formato suele estar al final)
+    return prompt_base[-3000:]
+
+
 def generar_reporte_final(client: Groq, prompt_base: str, contexto_macro: str, analisis_previo: str, fecha: str) -> str:
     """Toma los análisis parciales y genera la síntesis final del reporte completo."""
     system_prompt = (
@@ -154,17 +166,27 @@ def generar_reporte_final(client: Groq, prompt_base: str, contexto_macro: str, a
         "Respondés siempre en español y seguís estrictamente las instrucciones."
     )
 
-    user_message = f"""{prompt_base}
+    # Usar solo la sección de formato para reducir tokens de prompt
+    formato_salida = _extraer_seccion_formato(prompt_base)
+    # Limitar contexto macro a los primeros 1500 caracteres para ahorrar tokens
+    contexto_macro_corto = contexto_macro[:1500] + "..." if len(contexto_macro) > 1500 else contexto_macro
+
+    user_message = f"""## INSTRUCCIONES DE FORMATO Y SALIDA
+
+{formato_salida}
 
 ---
 
-## CONTEXTO MACRO Y ANÁLISIS PREVIO RECOPILADO ({fecha})
+## CONTEXTO MACRO RESUMIDO ({fecha})
 
-A continuación se encuentra el contexto macroeconómico y los análisis individuales que ya han sido generados para cada instrumento de la watchlist.
+{contexto_macro_corto}
 
-{contexto_macro}
+---
 
-### ANÁLISIS PREVIO:
+## ANÁLISIS PREVIO POR INSTRUMENTO
+
+Los siguientes análisis fueron generados previamente para cada instrumento de la watchlist:
+
 {analisis_previo}
 
 ---
@@ -173,7 +195,7 @@ A continuación se encuentra el contexto macroeconómico y los análisis individ
 
 - Fecha del reporte: {fecha}
 - Basado en el "Contexto Macro" y el "Análisis previo", tu tarea es generar las secciones restantes del reporte y unificar todo.
-- Genera el reporte COMPLETO con el formato exacto de salida.
+- Genera el reporte COMPLETO con el formato exacto de salida indicado arriba.
 - Para la sección "## 📊 ANÁLISIS POR INSTRUMENTO", copia y adapta levemente la información que se te proveyó en el Análisis Previo (debes incluir la información de todos los {len(WATCHLIST)} instrumentos analizados).
 - Extrae el veredicto de cada instrumento del Análisis Previo para construir el Resumen Ejecutivo.
 """
@@ -182,7 +204,7 @@ A continuación se encuentra el contexto macroeconómico y los análisis individ
     inicio = time.time()
     response = client.chat.completions.create(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
+        max_tokens=3500,  # Reducido de 4096 para dejar margen al prompt
         temperature=TEMPERATURA,
         messages=[
             {"role": "system", "content": system_prompt},
