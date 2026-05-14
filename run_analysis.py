@@ -69,14 +69,11 @@ def buscar_ticker(ddgs: DDGS, ticker: str) -> str:
     return "\n\n".join(resultados) if resultados else "Sin resultados."
 
 
-def recopilar_contexto_mercado(fecha: str) -> str:
-    """Ejecuta todas las búsquedas y arma el bloque de contexto para el LLM."""
-    print("🔍 Buscando datos de mercado con DuckDuckGo...")
+def recopilar_contexto_macro(fecha: str) -> str:
+    """Busca solo el contexto macroeconómico."""
+    print("🔍 Buscando datos de mercado macro con DuckDuckGo...")
     bloques = [f"# Datos de mercado recopilados — {fecha}\n"]
-
     with DDGS() as ddgs:
-        # Contexto macro general
-        print("   ↳ Contexto macro del día...")
         try:
             macro = ddgs.text("S&P 500 market today Wall Street", max_results=3)
             macro_txt = "\n".join(h.get("body", "") for h in macro)
@@ -84,21 +81,24 @@ def recopilar_contexto_mercado(fecha: str) -> str:
             time.sleep(0.5)
         except Exception as e:
             bloques.append(f"## Contexto macro\n[Error: {e}]\n")
+    return "\n".join(bloques)
 
-        # Datos por ticker
-        for ticker in WATCHLIST:
+
+def recopilar_contexto_tickers(tickers: list) -> str:
+    """Busca datos solo para un subgrupo de tickers."""
+    bloques = []
+    with DDGS() as ddgs:
+        for ticker in tickers:
             print(f"   ↳ {ticker}...")
             datos = buscar_ticker(ddgs, ticker)
             bloques.append(f"## {ticker}\n{datos}\n")
-
     return "\n".join(bloques)
 
 
 # ── Llamada a Groq ─────────────────────────────────────────────────────────────
 
-def generar_reporte(client: Groq, prompt_base: str, contexto: str, fecha: str) -> str:
-    """Envía el prompt + contexto a Groq y retorna el reporte generado."""
-
+def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str, contexto_tickers: str, fecha: str, tickers_chunk: list) -> str:
+    """Genera el análisis solo para un grupo de acciones (evita límite de tokens)."""
     system_prompt = (
         "Eres un analista financiero senior especializado en Wall Street. "
         "Seguís estrictamente el protocolo de análisis definido por el usuario. "
@@ -113,26 +113,73 @@ def generar_reporte(client: Groq, prompt_base: str, contexto: str, fecha: str) -
 
 ## CONTEXTO DE MERCADO RECOPILADO HOY ({fecha})
 
-A continuación se incluyen los datos de mercado obtenidos de búsquedas web
-realizadas hoy. Usá esta información como base principal para el análisis.
-Podés complementar con tu conocimiento hasta tu fecha de corte, pero priorizá
-siempre los datos del contexto cuando haya diferencias.
+{contexto_macro}
 
-{contexto}
+{contexto_tickers}
 
 ---
 
-## INSTRUCCIÓN FINAL
+## INSTRUCCIÓN FINAL (PROCESAMIENTO EN BLOQUES)
 
 - Fecha del reporte: {fecha}
-- Ejecutá el análisis completo de todos los instrumentos de la watchlist.
-- Producí el reporte con exactamente el formato de salida definido en el prompt.
-- Si algún dato no está disponible en el contexto, marcalo con ⚠️ en lugar de inventarlo.
+- ESTA ES UNA EJECUCIÓN PARCIAL. Solo debes analizar los siguientes instrumentos: {', '.join(tickers_chunk)}.
+- Ignora el resto de los instrumentos de la watchlist.
+- Genera SOLO la sección "## 📊 ANÁLISIS POR INSTRUMENTO" para estos {len(tickers_chunk)} tickers, sin incluir la introducción macro, alertas prioritarias, resumen ejecutivo ni disclaimer.
+- Usa exactamente el formato indicado para cada ticker.
 """
 
-    print(f"🤖 Enviando análisis a Groq ({MODEL})...")
+    print(f"🤖 Enviando análisis parcial a Groq para {', '.join(tickers_chunk)}...")
     inicio = time.time()
+    response = client.chat.completions.create(
+        model=MODEL,
+        max_tokens=2048, # Límite menor para reportes parciales
+        temperature=TEMPERATURA,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_message},
+        ],
+    )
+    elapsed = time.time() - inicio
+    uso = response.usage
+    print(f"✅ Respuesta parcial recibida en {elapsed:.1f}s")
+    print(f"   Tokens — prompt: {uso.prompt_tokens:,} | completion: {uso.completion_tokens:,} | total: {uso.total_tokens:,}")
 
+    return response.choices[0].message.content
+
+
+def generar_reporte_final(client: Groq, prompt_base: str, contexto_macro: str, analisis_previo: str, fecha: str) -> str:
+    """Toma los análisis parciales y genera la síntesis final del reporte completo."""
+    system_prompt = (
+        "Eres un analista financiero senior especializado en Wall Street. "
+        "Respondés siempre en español y seguís estrictamente las instrucciones."
+    )
+
+    user_message = f"""{prompt_base}
+
+---
+
+## CONTEXTO MACRO Y ANÁLISIS PREVIO RECOPILADO ({fecha})
+
+A continuación se encuentra el contexto macroeconómico y los análisis individuales que ya han sido generados para cada instrumento de la watchlist.
+
+{contexto_macro}
+
+### ANÁLISIS PREVIO:
+{analisis_previo}
+
+---
+
+## INSTRUCCIÓN FINAL (SÍNTESIS COMPLETA)
+
+- Fecha del reporte: {fecha}
+- Basado en el "Contexto Macro" y el "Análisis previo", tu tarea es generar las secciones restantes del reporte y unificar todo.
+- Genera el reporte COMPLETO con el formato exacto de salida.
+- Para la sección "## 📊 ANÁLISIS POR INSTRUMENTO", copia y adapta levemente la información que se te proveyó en el Análisis Previo (debes incluir la información de todos los {len(WATCHLIST)} instrumentos analizados).
+- Extrae el veredicto de cada instrumento del Análisis Previo para construir el Resumen Ejecutivo.
+"""
+
+    print(f"🤖 Enviando síntesis final a Groq ({MODEL})...")
+    inicio = time.time()
     response = client.chat.completions.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
@@ -142,10 +189,9 @@ siempre los datos del contexto cuando haya diferencias.
             {"role": "user",   "content": user_message},
         ],
     )
-
     elapsed = time.time() - inicio
     uso = response.usage
-    print(f"✅ Respuesta recibida en {elapsed:.1f}s")
+    print(f"✅ Reporte final recibido en {elapsed:.1f}s")
     print(f"   Tokens — prompt: {uso.prompt_tokens:,} | completion: {uso.completion_tokens:,} | total: {uso.total_tokens:,}")
 
     return response.choices[0].message.content
@@ -161,6 +207,11 @@ def guardar_reporte(contenido: str, fecha: str) -> pathlib.Path:
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
+
+def chunk_list(lista, n):
+    for i in range(0, len(lista), n):
+        yield lista[i:i + n]
+
 
 def main() -> None:
     hoy         = datetime.date.today()
@@ -183,17 +234,39 @@ def main() -> None:
     prompt_base = PROMPT_FILE.read_text(encoding="utf-8")
     print(f"✅ Prompt cargado ({len(prompt_base):,} caracteres)")
 
-    # Recopilar contexto de mercado con DuckDuckGo
-    contexto = recopilar_contexto_mercado(fecha_leg)
-    print(f"✅ Contexto recopilado ({len(contexto):,} caracteres)")
+    # 1. Recopilar contexto macro
+    contexto_macro = recopilar_contexto_macro(fecha_leg)
 
-    # Generar reporte con Groq
-    client  = Groq(api_key=api_key)
-    reporte = generar_reporte(client, prompt_base, contexto, fecha_leg)
+    client = Groq(api_key=api_key)
+    analisis_parciales = []
 
-    # Guardar
-    ruta = guardar_reporte(reporte, fecha_str)
-    print(f"💾 Reporte guardado en: {ruta}")
+    # 2. Procesar en bloques para evitar Rate Limits
+    # Separar watchlist en bloques de 3
+    chunks = list(chunk_list(WATCHLIST, 3))
+    for i, chunk in enumerate(chunks):
+        print(f"\n📦 Procesando bloque {i+1}/{len(chunks)}: {', '.join(chunk)}")
+        contexto_chunk = recopilar_contexto_tickers(chunk)
+        
+        reporte_parcial = generar_analisis_parcial(
+            client, prompt_base, contexto_macro, contexto_chunk, fecha_leg, chunk
+        )
+        analisis_parciales.append(reporte_parcial)
+        
+        # Pausa de 60 segundos entre llamados a la API de Groq para evitar Rate Limit (TPM)
+        if i < len(chunks) - 1:
+            print("⏳ Pausa de 60s para resetear los tokens de Groq (TPM limit)...")
+            time.sleep(60)
+
+    # 3. Síntesis final
+    print("\n⏳ Pausa de 60s antes de la síntesis final...")
+    time.sleep(60)
+    
+    analisis_unidos = "\n\n".join(analisis_parciales)
+    reporte_final = generar_reporte_final(client, prompt_base, contexto_macro, analisis_unidos, fecha_leg)
+
+    # 4. Guardar
+    ruta = guardar_reporte(reporte_final, fecha_str)
+    print(f"\n💾 Reporte guardado en: {ruta}")
     print("=" * 55)
     print("✅ Análisis completado.\n")
 
