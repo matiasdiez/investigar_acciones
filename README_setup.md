@@ -13,9 +13,9 @@ Guía paso a paso para dejar el sistema funcionando en menos de 15 minutos.
 │       └── daily_stock_report.yml   ← El scheduler de GitHub Actions
 ├── reportes/                        ← Acá se guardan los reportes generados
 │   └── reporte_YYYY-MM-DD.md
-├── prompt_llm.md                    ← El prompt para Claude (de tu sistema)
+├── prompt_llm.md                    ← El prompt para el modelo de análisis
 ├── guia_usuario.md                  ← Tu guía de configuración
-├── run_analysis.py                  ← Genera el reporte via Claude API
+├── run_analysis.py                  ← Genera el reporte via Groq API
 ├── send_email.py                    ← Envía el reporte por email
 ├── requirements.txt                 ← Dependencias Python
 └── README_setup.md                  ← Este archivo
@@ -50,7 +50,7 @@ Los Secrets son variables de entorno cifradas que GitHub Actions usa en el workf
 
 | Secret name        | Valor                                          |
 |--------------------|------------------------------------------------|
-| `ANTHROPIC_API_KEY`| Tu API key de [console.anthropic.com](https://console.anthropic.com) |
+| `GROQ_API_KEY`     | Tu API key de [console.groq.com](https://console.groq.com) |
 | `EMAIL_SENDER`     | Tu dirección Gmail (ej: `tumail@gmail.com`)    |
 | `EMAIL_PASSWORD`   | App Password de Google (ver Paso 3)            |
 | `EMAIL_RECIPIENT`  | El email que recibirá el reporte               |
@@ -135,9 +135,9 @@ Si `EMAIL_RECIPIENT` está configurado, el reporte llega a tu bandeja con:
 | Componente          | Costo                                      |
 |---------------------|--------------------------------------------|
 | GitHub Actions      | **Gratis** (2.000 minutos/mes en plan free)|
-| Claude API (Sonnet) | ~$0.05–0.15 por reporte                    |
+| Groq API            | **Gratis** (tier gratuito con LPU)         |
 | Gmail SMTP          | **Gratis**                                 |
-| **Total mensual**   | **< $3 USD**                               |
+| **Total mensual**   | **$0 USD**                                 |
 
 Cada reporte tarda aproximadamente 2–4 minutos en GitHub Actions (incluye setup de Python, llamada a la API y push).
 

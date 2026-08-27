@@ -25,6 +25,9 @@ jobs:
     permissions:
       contents: write  # Necesario para hacer git push del reporte generado
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       # 1. Clonar el repositorio
       - name: Checkout del repositorio
@@ -41,7 +44,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      # 4. Generar el reporte con Claude API
+      # 4. Generar el reporte con Groq API
       - name: Generar reporte de acciones
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}

@@ -2,7 +2,7 @@
 run_analysis.py
 ---------------
 Genera el reporte diario de acciones usando:
-  - Groq API (gratuito) con el modelo llama-3.3-70b
+  - Groq API (gratuito) con el modelo openai/gpt-oss-120b
   - DuckDuckGo Search (gratuito, sin API key) para datos actualizados
 
 Flujo:
@@ -20,13 +20,16 @@ import sys
 import time
 
 from groq import Groq
-from ddgs import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
 PROMPT_FILE   = pathlib.Path("prompt_llm.md")
 REPORTES_DIR  = pathlib.Path("reportes")
-MODEL         = "llama-3.3-70b-versatile"
+MODEL         = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 TEMPERATURA   = 0.2   # Bajo para maximizar precisión en análisis financiero
 
 WATCHLIST = ["AAPL", "AMZN", "BIOX", "BRK.B", "GLD", "KO", "NVDA", "SPY", "XLU"]
@@ -100,23 +103,33 @@ def recopilar_contexto_tickers(tickers: list) -> str:
 
 # ── Llamadas a Groq ────────────────────────────────────────────────────────────
 
-def _llamar_groq(client: Groq, system: str, user: str, max_tokens: int, etiqueta: str) -> str:
-    """Wrapper genérico para llamadas a Groq con logging de tokens."""
-    inicio = time.time()
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        temperature=TEMPERATURA,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user},
-        ],
-    )
-    elapsed = time.time() - inicio
-    uso = response.usage
-    print(f"✅ {etiqueta} recibido en {elapsed:.1f}s")
-    print(f"   Tokens — prompt: {uso.prompt_tokens:,} | completion: {uso.completion_tokens:,} | total: {uso.total_tokens:,}")
-    return response.choices[0].message.content
+def _llamar_groq(client: Groq, system: str, user: str, max_tokens: int, etiqueta: str, max_retries: int = 3) -> str:
+    """Wrapper genérico para llamadas a Groq con logging de tokens y reintentos automáticos."""
+    for intento in range(1, max_retries + 1):
+        try:
+            inicio = time.time()
+            response = client.chat.completions.create(
+                model=MODEL,
+                max_tokens=max_tokens,
+                temperature=TEMPERATURA,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+            )
+            elapsed = time.time() - inicio
+            uso = response.usage
+            print(f"✅ {etiqueta} recibido en {elapsed:.1f}s")
+            print(f"   Tokens — prompt: {uso.prompt_tokens:,} | completion: {uso.completion_tokens:,} | total: {uso.total_tokens:,}")
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"⚠️ Error en llamada a Groq ({etiqueta}, intento {intento}/{max_retries}): {e}")
+            if intento < max_retries:
+                espera = 15 * intento
+                print(f"   Reintentando en {espera}s...")
+                time.sleep(espera)
+            else:
+                raise
 
 
 def _extraer_instrucciones_analisis(prompt_base: str) -> str:
