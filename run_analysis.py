@@ -176,11 +176,14 @@ def generar_analisis_parcial(client: Groq, prompt_base: str, contexto_macro: str
 - Genera SOLO los bloques de análisis para estos {len(tickers_chunk)} tickers.
 - Comenzá directamente con "### {tickers_chunk[0]} —" sin ningún encabezado previo.
 - No incluyas introducción macro, alertas prioritarias, resumen ejecutivo, disclaimer ni el header del reporte.
-- Usá exactamente el formato de análisis por instrumento indicado arriba para cada ticker.
+- Para cada ticker analizado, desarrollá detalladamente los Pasos 1 a 7 con sus tablas.
+- OBLIGATORIO AL FINAL DE CADA TICKER: Debes cerrar el análisis del ticker incluyendo explícitamente estas dos líneas:
+  **Veredicto del día:** 🟢 Mantener / 🔴 Reducir / 🔵 Acumular / ⚪ Observar
+  **Razón:** [1 a 2 oraciones justificando la decisión]
 """
 
     print(f"🤖 Enviando análisis parcial a Groq para {', '.join(tickers_chunk)}...")
-    return _llamar_groq(client, system_prompt, user_message, max_tokens=2048, etiqueta="Análisis parcial")
+    return _llamar_groq(client, system_prompt, user_message, max_tokens=3500, etiqueta=f"Análisis {', '.join(tickers_chunk)}")
 
 
 def generar_contexto_macro_texto(client: Groq, contexto_raw: str, fecha: str) -> str:
@@ -209,21 +212,24 @@ def generar_alertas(client: Groq, analisis_unidos: str, fecha: str) -> str:
         "Eres un analista financiero senior. Respondés siempre en español. "
         "Nunca inventás datos: usá solo la información provista."
     )
-    # Resumir análisis para no exceder el límite: extraer solo los veredictos
-    lineas_veredicto = [l for l in analisis_unidos.split("\n") if "Veredicto" in l or "Razón:" in l or "### " in l]
-    resumen_veredictos = "\n".join(lineas_veredicto[:60])  # Máximo 60 líneas
+    # Extraer líneas de veredictos, razones y titulares para armar las alertas
+    lineas_relevantes = [
+        l for l in analisis_unidos.split("\n")
+        if any(k in l for k in ["### ", "Veredicto", "Razón:", "🟢", "🔴", "🟡", "Titular", "Paso 2"])
+    ]
+    resumen_veredictos = "\n".join(lineas_relevantes[:100])
 
-    user_message = f"""Con base en los siguientes veredictos y análisis, listá las 3 a 5 alertas más urgentes o relevantes del día.
-Formato: numeradas del 1 al 5, con emoji 🔴/🟢/🟡 según impacto, ticker en mayúsculas y descripción breve en una línea.
-No incluyas encabezados, solo la lista.
+    user_message = f"""Con base en los siguientes análisis y veredictos del día, listá las 3 a 5 alertas más urgentes o relevantes de la jornada.
+Formato: lista numerada del 1 al 5, con emoji 🔴/🟢/🟡 según impacto, ticker en mayúsculas y descripción clara en una línea.
+No incluyas encabezados adicionales, solo la lista numerada.
 
-VEREDICTOS:
+ANÁLISIS Y VEREDICTOS:
 {resumen_veredictos}
 
 Fecha: {fecha}
 """
     print("🤖 Generando alertas prioritarias...")
-    return _llamar_groq(client, system_prompt, user_message, max_tokens=300, etiqueta="Alertas")
+    return _llamar_groq(client, system_prompt, user_message, max_tokens=400, etiqueta="Alertas")
 
 
 def generar_resumen_ejecutivo(client: Groq, analisis_unidos: str, fecha: str) -> str:
@@ -232,11 +238,14 @@ def generar_resumen_ejecutivo(client: Groq, analisis_unidos: str, fecha: str) ->
         "Eres un analista financiero senior. Respondés siempre en español. "
         "Nunca inventás datos: usá solo la información provista."
     )
-    # Extraer solo líneas relevantes para el resumen
-    lineas_relevantes = [l for l in analisis_unidos.split("\n") 
-                         if "### " in l or "Precio actual" in l or "Variación diaria" in l 
-                         or "Veredicto" in l or "Razón:" in l]
-    resumen = "\n".join(lineas_relevantes[:80])
+    # Extraer líneas relevantes para que el modelo tenga datos de precio, variación y veredicto
+    lineas_relevantes = [
+        l for l in analisis_unidos.split("\n")
+        if any(k in l for k in [
+            "### ", "Precio", "Variación", "Veredicto", "Razón:", "Cierre", "cierre", "Titular"
+        ])
+    ]
+    resumen = "\n".join(lineas_relevantes[:150])
 
     user_message = f"""Con base en el siguiente análisis, generá la tabla del Resumen Ejecutivo.
 La tabla debe tener exactamente estas columnas: Ticker | Precio | Var. Diaria | Veredicto | Catalizador Principal
@@ -245,13 +254,13 @@ Usá los emojis de veredicto: 🟢 Mantener / 🔴 Reducir / 🔵 Acumular / ⚪
 Si no tenés el dato exacto de precio o variación, usá "⚠️ N/D".
 Devolvé SOLO la tabla markdown, sin texto adicional.
 
-ANÁLISIS:
+DATOS EXTRAÍDOS:
 {resumen}
 
 Fecha: {fecha}
 """
     print("🤖 Generando resumen ejecutivo...")
-    return _llamar_groq(client, system_prompt, user_message, max_tokens=400, etiqueta="Resumen ejecutivo")
+    return _llamar_groq(client, system_prompt, user_message, max_tokens=500, etiqueta="Resumen ejecutivo")
 
 
 # ── Ensamblado del reporte ─────────────────────────────────────────────────────
@@ -338,10 +347,10 @@ def main() -> None:
     client = Groq(api_key=api_key)
     analisis_parciales = []
 
-    # 2. Procesar en bloques de 3 tickers para evitar Rate Limits
-    chunks = list(chunk_list(WATCHLIST, 3))
+    # 2. Procesar instrumento por instrumento (1 ticker por bloque) para garantizar exhaustividad y tablas completas
+    chunks = list(chunk_list(WATCHLIST, 1))
     for i, chunk in enumerate(chunks):
-        print(f"\n📦 Procesando bloque {i+1}/{len(chunks)}: {', '.join(chunk)}")
+        print(f"\n📦 Procesando instrumento {i+1}/{len(chunks)}: {chunk[0]}")
         contexto_chunk = recopilar_contexto_tickers(chunk)
 
         reporte_parcial = generar_analisis_parcial(
@@ -349,24 +358,24 @@ def main() -> None:
         )
         analisis_parciales.append(reporte_parcial)
 
-        # Pausa de 60 segundos entre llamados a la API de Groq para evitar Rate Limit (TPM)
+        # Pausa de 10 segundos entre instrumentos para no saturar la API
         if i < len(chunks) - 1:
-            print("⏳ Pausa de 60s para resetear los tokens de Groq (TPM limit)...")
-            time.sleep(60)
+            print("⏳ Pausa de 10s entre instrumentos...")
+            time.sleep(10)
 
     analisis_unidos = "\n\n---\n\n".join(analisis_parciales)
 
     # 3. Generar las 3 secciones cortas (cada una en llamado separado con pausa)
-    print("\n⏳ Pausa de 60s antes de las secciones finales...")
-    time.sleep(60)
+    print("\n⏳ Pausa de 10s antes de las secciones finales...")
+    time.sleep(10)
     contexto_macro_texto = generar_contexto_macro_texto(client, contexto_macro_raw, fecha_leg)
 
-    print("⏳ Pausa de 30s...")
-    time.sleep(30)
+    print("⏳ Pausa de 5s...")
+    time.sleep(5)
     alertas = generar_alertas(client, analisis_unidos, fecha_leg)
 
-    print("⏳ Pausa de 30s...")
-    time.sleep(30)
+    print("⏳ Pausa de 5s...")
+    time.sleep(5)
     resumen_ejecutivo = generar_resumen_ejecutivo(client, analisis_unidos, fecha_leg)
 
     # 4. Ensamblar reporte en Python (sin llamado adicional a Groq)
